@@ -1,5 +1,5 @@
 import { askGroq } from "../lib/groq.js";
-import { getAccts, setAccts, getTxs, addTxs, setDefault, addAccount, deleteAllTxs, deleteLastTx, deleteTxByDescription } from "../lib/db.js";
+import { getAccts, setAccts, getTxs, addTxs, setDefault, addAccount, deleteAllTxs, deleteLastTx, deleteTxByDescription, deleteTxById } from "../lib/db.js";
 import { buildReport, detectMonthFilter } from "../lib/report.js";
 
 // Parse application/x-www-form-urlencoded (what Twilio sends)
@@ -53,6 +53,29 @@ export default async function handler(req, res) {
 
   const lower = msgBody.toLowerCase();
 
+  // Listar todas as transações
+  const listKeywords = ["listar", "lista", "listar tudo", "todas as transações", "todas as transacoes"];
+  if (listKeywords.some(k => lower.includes(k))) {
+    const txs = await getTxs(from);
+    const confirmed = txs.filter(t => !t.scheduled);
+    if (!confirmed.length) {
+      res.setHeader("Content-Type", "text/xml");
+      res.status(200).send(twimlReply("Não há transações registadas."));
+      return;
+    }
+    const MAX = 20;
+    const recent = [...confirmed].reverse().slice(0, MAX);
+    const header = `📋 *Transações (${confirmed.length} total — últimas ${recent.length}):*\n\n`;
+    const lines = recent.map(tx => {
+      const sign = tx.type === "income" ? "+" : tx.type === "transfer" ? "⇄" : "-";
+      return `\`#${tx.id}\` ${tx.date} ${sign}€${tx.amount.toFixed(2)} ${tx.description} (${tx.account})`;
+    });
+    const footer = confirmed.length > MAX ? `\n\n_Usa "listar abril" para filtrar por mês._` : "";
+    res.setHeader("Content-Type", "text/xml");
+    res.status(200).send(twimlReply(header + lines.join("\n") + footer));
+    return;
+  }
+
   // Detect report request without calling Groq (faster + save tokens)
   const reportKeywords = ["resumo","relatório","relatorio","saldo","quanto gastei","quanto entrou","estatísticas","estatisticas"];
   const isReport = reportKeywords.some(k => lower.includes(k));
@@ -92,6 +115,18 @@ export default async function handler(req, res) {
 "conta padrão Moey"`;
     res.setHeader("Content-Type", "text/xml");
     res.status(200).send(twimlReply(help));
+    return;
+  }
+
+  // Apagar por ID: "apagar #c3d4"
+  const idMatch = lower.match(/^apaga(?:r)?\s+#([a-z0-9]{4})$/);
+  if (idMatch) {
+    const removed = await deleteTxById(from, idMatch[1]);
+    const reply = removed
+      ? `✓ Removida: ${removed.description} (€${removed.amount.toFixed(2)} — ${removed.date})`
+      : `Nenhuma transação encontrada com ID #${idMatch[1]}.`;
+    res.setHeader("Content-Type", "text/xml");
+    res.status(200).send(twimlReply(reply));
     return;
   }
 

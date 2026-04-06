@@ -1,6 +1,6 @@
 {
   "name": "financas-bot",
-  "version": "0.7.003",
+  "version": "0.7.005",
   "private": true,
   "dependencies": {
     "@vercel/kv": "^1.0.1",
