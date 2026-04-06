@@ -63,8 +63,8 @@ export default async function handler(req, res) {
     return;
   }
 
-  // Always ack Telegram immediately
-  res.status(200).end();
+  // Always ack Telegram immediately — but keep function alive
+  res.status(200).json({ ok: true });
 
   let update;
   try {
