@@ -1,9 +1,8 @@
 {
-  "name": "financas-bot",
-  "version": "0.7.009",
+  "name": "pfbot",
+  "version": "0.7.011",
   "private": true,
   "dependencies": {
-    "@vercel/kv": "^1.0.1",
-    "twilio": "^5.3.0"
+    "@vercel/kv": "^1.0.1"
   }
 }
