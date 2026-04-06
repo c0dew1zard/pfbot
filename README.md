@@ -73,4 +73,3 @@ lib/
   db.js          ← operações Vercel KV
   report.js      ← geração de relatórios em texto
 ```
-...

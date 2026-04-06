@@ -1,6 +1,6 @@
 {
   "name": "pfbot",
-  "version": "0.7.011",
+  "version": "0.7.012",
   "private": true,
   "dependencies": {
     "@vercel/kv": "^1.0.1"

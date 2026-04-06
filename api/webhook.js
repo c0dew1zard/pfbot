@@ -7,15 +7,25 @@ const ALLOWED_ID = process.env.ALLOWED_CHAT_ID ? String(process.env.ALLOWED_CHAT
 
 // ─── Telegram API ─────────────────────────────────────────────────────────────
 async function sendMessage(chatId, text) {
-  await fetch(`https://api.telegram.org/bot${BOT_TOKEN}/sendMessage`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      chat_id: chatId,
-      text,
-      parse_mode: "Markdown",
-    }),
-  });
+  try {
+    const res = await fetch(`https://api.telegram.org/bot${BOT_TOKEN}/sendMessage`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        chat_id: chatId,
+        text,
+        parse_mode: "Markdown",
+      }),
+    });
+    const data = await res.json();
+    if (!data.ok) {
+      console.error(`[pfbot][ERROR][sendMessage]`, JSON.stringify(data));
+    } else {
+      console.log(`[pfbot][sendMessage] ok to ${chatId}`);
+    }
+  } catch (err) {
+    console.error(`[pfbot][ERROR][sendMessage_fetch]`, err?.message);
+  }
 }
 // ─────────────────────────────────────────────────────────────────────────────
 
