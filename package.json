@@ -1,0 +1,9 @@
+{
+  "name": "financas-bot",
+  "version": "0.7.002",
+  "private": true,
+  "dependencies": {
+    "@vercel/kv": "^1.0.1",
+    "twilio": "^5.3.0"
+  }
+}
