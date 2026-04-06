@@ -52,7 +52,7 @@ Ou faz push para um repositório GitHub ligado ao Vercel — deploy automático.
 | Mensagem | Resultado |
 |---|---|
 | "paguei 480€ de renda" | Regista despesa |
-| "recebi 3000 de Cliente" | Regista receita |
+| "recebi 1000 da Seeksmarter" | Regista receita |
 | "transferi 200 da Revolut para Moey" | Regista transferência |
 | "resumo" / "saldo" | Relatório do mês atual |
 | "relatório abril" | Relatório de abril |
