@@ -5,14 +5,14 @@ import { buildReport, detectMonthFilter } from "../lib/report.js";
 // ─── Logger — guarda no KV, visível via comando "debug" no WhatsApp ──────────
 async function log(from, tag, data) {
   const str = typeof data === "object" ? JSON.stringify(data) : String(data ?? "");
-  console.log(`[pfbot][${tag}]`, str); // ainda aparece nos logs do Vercel se disponíveis
-  await appendLog(from, tag, str);
+  console.log(`[pfbot][${tag}]`, str);
+  appendLog(from, tag, str); // fire-and-forget, nunca bloqueia
 }
 
 async function logError(from, tag, err) {
-  const str = `${err?.message || err} | ${err?.stack?.split("\n")[1]?.trim() || ""}`;
+  const str = `${err?.message || err}`;
   console.error(`[pfbot][ERROR][${tag}]`, str);
-  await appendLog(from, `ERR:${tag}`, str);
+  appendLog(from, `ERR:${tag}`, str); // fire-and-forget
 }
 // ─────────────────────────────────────────────────────────────────────────────
 
