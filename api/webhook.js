@@ -1,7 +1,7 @@
 import { askGroq } from "../lib/groq.js";
-import { getAccts, getTxs, addTxs, setDefault, addAccount, deleteAllTxs, deleteLastTx, deleteTxByDescription, deleteTxById, appendLog, getLogs, clearLogs } from "../lib/db.js";
+import { getAccts, getTxs, addTxs, setDefault, addAccount, deleteAllTxs, deleteLastTx, deleteTxByDescription, deleteTxById, appendLog, getLogs, clearLogs, getSession, setSession, clearSession } from "../lib/db.js";
 import { buildReport, detectMonthFilter } from "../lib/report.js";
-import { parseRevolutExcel } from "../lib/revolut.js";
+import { parseRevolutExcel, formatReviewItem } from "../lib/revolut.js";
 
 const BOT_TOKEN  = process.env.TELEGRAM_BOT_TOKEN;
 const ALLOWED_ID = process.env.ALLOWED_CHAT_ID ? String(process.env.ALLOWED_CHAT_ID) : null;
@@ -80,40 +80,41 @@ export default async function handler(req, res) {
     }
     log(from, "cmd", `upload:${doc.file_name}`);
     try {
-      // Get file path from Telegram
       const fileRes = await fetch(`https://api.telegram.org/bot${BOT_TOKEN}/getFile?file_id=${doc.file_id}`);
       const fileData = await fileRes.json();
       if (!fileData.ok) throw new Error("Nao foi possivel obter o ficheiro.");
-
-      const filePath = fileData.result.file_path;
-      const fileUrl = `https://api.telegram.org/file/bot${BOT_TOKEN}/${filePath}`;
-
-      // Download file
+      const fileUrl = `https://api.telegram.org/file/bot${BOT_TOKEN}/${fileData.result.file_path}`;
       const dlRes = await fetch(fileUrl);
       const buffer = await dlRes.arrayBuffer();
+      const accts = await getAccts(from);
+      const { txs, review, newAccounts } = parseRevolutExcel(Buffer.from(buffer), accts);
 
-      // Parse
-      const { txs, skipped } = parseRevolutExcel(Buffer.from(buffer));
-      log(from, "revolut_parsed", { count: txs.length, skipped: skipped.length });
+      // Auto-create new accounts
+      for (const name of newAccounts) await addAccount(from, name);
 
-      if (txs.length === 0) {
-        await sendMessage(chatId, `Nenhuma transacao importada.\nIgnoradas: ${skipped.length}`);
-        res.status(200).end();
-        return;
+      // Import clean transactions immediately
+      if (txs.length > 0) await addTxs(from, txs);
+
+      const income    = txs.filter(t => t.type === "income").reduce((s,t) => s+t.amount, 0);
+      const expense   = txs.filter(t => t.type === "expense").reduce((s,t) => s+t.amount, 0);
+      const transfers = txs.filter(t => t.type === "transfer").length;
+
+      let summary = `Revolut importado!\n`;
+      summary += `Transacoes: ${txs.length}`;
+      if (income > 0)    summary += ` | +EUR${income.toFixed(2)}`;
+      if (expense > 0)   summary += ` | -EUR${expense.toFixed(2)}`;
+      if (transfers > 0) summary += ` | ${transfers} transferencias`;
+      if (newAccounts.length > 0) summary += `\nContas criadas: ${newAccounts.join(", ")}`;
+
+      await sendMessage(chatId, summary);
+
+      // If there are items needing review, start session
+      if (review.length > 0) {
+        await setSession(from, { review, current: 0 });
+        const first = review[0];
+        await sendMessage(chatId, formatReviewItem(first, 1, review.length));
       }
 
-      await addTxs(from, txs);
-
-      const income  = txs.filter(t => t.type === "income").reduce((s,t) => s+t.amount, 0);
-      const expense = txs.filter(t => t.type === "expense").reduce((s,t) => s+t.amount, 0);
-
-      let reply = `Revolut importado com sucesso!\n\n`;
-      reply += `Transacoes importadas: ${txs.length}\n`;
-      reply += `Entrou: +EUR${income.toFixed(2)}\n`;
-      reply += `Saiu: -EUR${expense.toFixed(2)}\n`;
-      if (skipped.length > 0) reply += `\nIgnoradas: ${skipped.length} (pendentes, internas ou nao-EUR)`;
-
-      await sendMessage(chatId, reply);
     } catch (err) {
       logError(from, "revolut_import", err);
       await sendMessage(chatId, `Erro ao importar: ${err.message}`);
@@ -123,8 +124,54 @@ export default async function handler(req, res) {
   }
 
   const msgBody = message.text.trim();
+  const lower   = msgBody.toLowerCase();
 
-  const lower = msgBody.toLowerCase();
+  // ── Sessão de revisão activa ───────────────────────────────────────────────
+  const session = await getSession(from);
+  if (session && ["a","b","c"].includes(lower.trim())) {
+    const { review, current } = session;
+    const item = review[current];
+    const choice = lower.trim();
+    log(from, "review_choice", { choice, item: item.description });
+
+    if (choice === "a") {
+      // Import as suggested
+      const accts = await getAccts(from);
+      if (item.suggestedType === "transfer" && item.suggestedToAccount) {
+        if (!accts[item.suggestedToAccount]) await addAccount(from, item.suggestedToAccount);
+        await addTxs(from, [{ ...item, type: "transfer", toAccount: item.suggestedToAccount, category: null }]);
+      } else {
+        await addTxs(from, [{ ...item, type: item.suggestedType || (item.amount < 0 ? "expense" : "income"), category: item.category }]);
+      }
+      await sendMessage(chatId, `Registado.`);
+    } else if (choice === "c") {
+      // Import as scheduled
+      await addTxs(from, [{ ...item, type: item.suggestedType || "expense", category: item.category, scheduled: true }]);
+      await sendMessage(chatId, `Guardado como agendado.`);
+    } else {
+      await sendMessage(chatId, `Ignorado.`);
+    }
+
+    // Next item or finish
+    const next = current + 1;
+    if (next < review.length) {
+      await setSession(from, { review, current: next });
+      await sendMessage(chatId, formatReviewItem(review[next], next + 1, review.length));
+    } else {
+      await clearSession(from);
+      await sendMessage(chatId, `Revisao concluida! Todas as transacoes processadas.`);
+    }
+    res.status(200).end();
+    return;
+  }
+
+  // If session active but user typed something else, remind
+  if (session) {
+    const item = session.review[session.current];
+    await sendMessage(chatId, `Ainda tens uma revisao pendente. Responde com a, b ou c.\n\n` + formatReviewItem(item, session.current + 1, session.review.length));
+    res.status(200).end();
+    return;
+  }
 
   // ── Debug ─────────────────────────────────────────────────────────────────
   if (lower === "debug" || lower === "logs") {
