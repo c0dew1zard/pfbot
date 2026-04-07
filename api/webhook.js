@@ -1,6 +1,7 @@
 import { askGroq } from "../lib/groq.js";
 import { getAccts, getTxs, addTxs, setDefault, addAccount, deleteAllTxs, deleteLastTx, deleteTxByDescription, deleteTxById, appendLog, getLogs, clearLogs } from "../lib/db.js";
 import { buildReport, detectMonthFilter } from "../lib/report.js";
+import { parseRevolutExcel } from "../lib/revolut.js";
 
 const BOT_TOKEN  = process.env.TELEGRAM_BOT_TOKEN;
 const ALLOWED_ID = process.env.ALLOWED_CHAT_ID ? String(process.env.ALLOWED_CHAT_ID) : null;
@@ -56,10 +57,9 @@ export default async function handler(req, res) {
   catch { res.status(200).end(); return; }
 
   const message = update?.message;
-  if (!message?.text) { res.status(200).end(); return; }
+  if (!message?.text && !message?.document) { res.status(200).end(); return; }
 
   const chatId  = String(message.chat.id);
-  const msgBody = message.text.trim();
   const from    = `tg:${chatId}`;
 
   // Auth
@@ -68,6 +68,61 @@ export default async function handler(req, res) {
     res.status(200).end();
     return;
   }
+
+  // ── Documento (Excel Revolut) ─────────────────────────────────────────────
+  if (message?.document) {
+    const doc = message.document;
+    const fileName = (doc.file_name || "").toLowerCase();
+    if (!fileName.endsWith(".xlsx") && !fileName.endsWith(".xls")) {
+      await sendMessage(chatId, "Formato nao suportado. Envia o ficheiro .xlsx do Revolut.");
+      res.status(200).end();
+      return;
+    }
+    log(from, "cmd", `upload:${doc.file_name}`);
+    try {
+      // Get file path from Telegram
+      const fileRes = await fetch(`https://api.telegram.org/bot${BOT_TOKEN}/getFile?file_id=${doc.file_id}`);
+      const fileData = await fileRes.json();
+      if (!fileData.ok) throw new Error("Nao foi possivel obter o ficheiro.");
+
+      const filePath = fileData.result.file_path;
+      const fileUrl = `https://api.telegram.org/file/bot${BOT_TOKEN}/${filePath}`;
+
+      // Download file
+      const dlRes = await fetch(fileUrl);
+      const buffer = await dlRes.arrayBuffer();
+
+      // Parse
+      const { txs, skipped } = parseRevolutExcel(Buffer.from(buffer));
+      log(from, "revolut_parsed", { count: txs.length, skipped: skipped.length });
+
+      if (txs.length === 0) {
+        await sendMessage(chatId, `Nenhuma transacao importada.\nIgnoradas: ${skipped.length}`);
+        res.status(200).end();
+        return;
+      }
+
+      await addTxs(from, txs);
+
+      const income  = txs.filter(t => t.type === "income").reduce((s,t) => s+t.amount, 0);
+      const expense = txs.filter(t => t.type === "expense").reduce((s,t) => s+t.amount, 0);
+
+      let reply = `Revolut importado com sucesso!\n\n`;
+      reply += `Transacoes importadas: ${txs.length}\n`;
+      reply += `Entrou: +EUR${income.toFixed(2)}\n`;
+      reply += `Saiu: -EUR${expense.toFixed(2)}\n`;
+      if (skipped.length > 0) reply += `\nIgnoradas: ${skipped.length} (pendentes, internas ou nao-EUR)`;
+
+      await sendMessage(chatId, reply);
+    } catch (err) {
+      logError(from, "revolut_import", err);
+      await sendMessage(chatId, `Erro ao importar: ${err.message}`);
+    }
+    res.status(200).end();
+    return;
+  }
+
+  const msgBody = message.text.trim();
 
   const lower = msgBody.toLowerCase();
 
@@ -148,6 +203,9 @@ export default async function handler(req, res) {
 
 📊 *Relatorio:*
 "resumo" / "saldo" / "relatorio abril"
+
+📥 *Importar Revolut:*
+Envia o ficheiro .xlsx do extracto Revolut
 
 🗑 *Apagar:*
 "apagar ultima"

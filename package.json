@@ -1,8 +1,9 @@
 {
   "name": "pfbot",
-  "version": "0.7.014",
+  "version": "0.7.015",
   "private": true,
   "dependencies": {
-    "@vercel/kv": "^1.0.1"
+    "@vercel/kv": "^1.0.1",
+    "xlsx": "^0.18.5"
   }
 }
